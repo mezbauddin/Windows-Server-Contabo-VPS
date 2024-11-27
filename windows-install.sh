@@ -1,7 +1,6 @@
 #!/bin/bash
 
 apt update -y && apt upgrade -y
-
 apt install grub2 wimtools ntfs-3g -y
 
 # Get the disk size in GB and convert to MB
@@ -26,57 +25,73 @@ sleep 10
 mkfs.ntfs -f /dev/sda1
 mkfs.ntfs -f /dev/sda2
 
-echo "NTFS partitions created"
+echo "NTFS partitions created successfully."
 
-echo -e "r\ng\np\nw\nY\n" | gdisk /dev/sda
+# Ensure GPT is properly configured
+echo -e "r\nw\nY\n" | gdisk /dev/sda
+partprobe /dev/sda
+sleep 10
 
-mount /dev/sda1 /mnt
+# Mount the first partition
+mount /dev/sda1 /mnt || { echo "Failed to mount /dev/sda1"; exit 1; }
 
-# Prepare directory for the Windows disk
-cd ~
-mkdir windisk
+# Prepare directory for Windows disk
+mkdir -p /root/windisk
+umount /dev/sda2 2>/dev/null
+mount /dev/sda2 /root/windisk || { echo "Failed to mount /dev/sda2"; exit 1; }
 
-mount /dev/sda2 windisk
-
-grub-install --root-directory=/mnt /dev/sda
+# Install GRUB
+grub-install --target=i386-pc --boot-directory=/mnt/boot --recheck /dev/sda
 
 # Edit GRUB configuration
-cd /mnt/boot/grub
-cat <<EOF > grub.cfg
+mkdir -p /mnt/boot/grub
+cat <<EOF > /mnt/boot/grub/grub.cfg
 menuentry "windows installer" {
-	insmod ntfs
-	search --set=root --file=/bootmgr
-	ntldr /bootmgr
-	boot
+    insmod ntfs
+    search --set=root --file=/bootmgr
+    ntldr /bootmgr
+    boot
 }
 EOF
 
-cd /root/windisk
+# Download Windows Server ISO
+wget -O /root/windisk/winserver.iso "https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26100.1742.240906-0331.ge_release_svc_refresh_SERVER_EVAL_x64FRE_en-us.iso"
+if [ ! -s /root/windisk/winserver.iso ]; then
+    echo "Failed to download Windows Server ISO. Exiting..."
+    exit 1
+fi
 
-mkdir winfile
+# Mount the ISO
+if mount -o loop /root/windisk/winserver.iso /root/windisk/winfile; then
+    rsync -avz --progress /root/windisk/winfile/* /mnt
+    umount /root/windisk/winfile
+else
+    echo "Failed to mount Windows Server ISO. Exiting..."
+    exit 1
+fi
 
-wget -O win10.iso --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" https://t.ly/swrq1
+# Download VirtIO drivers ISO
+wget -O /root/windisk/virtio.iso "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso"
+if [ ! -s /root/windisk/virtio.iso ]; then
+    echo "Failed to download VirtIO ISO. Exiting..."
+    exit 1
+fi
 
-mount -o loop win10.iso winfile
+# Mount VirtIO ISO
+if mount -o loop /root/windisk/virtio.iso /root/windisk/winfile; then
+    mkdir -p /mnt/sources/virtio
+    rsync -avz --progress /root/windisk/winfile/* /mnt/sources/virtio
+    umount /root/windisk/winfile
+else
+    echo "Failed to mount VirtIO ISO. Exiting..."
+    exit 1
+fi
 
-rsync -avz --progress winfile/* /mnt
-
-umount winfile
-
-wget -O virtio.iso https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso
-
-mount -o loop virtio.iso winfile
-
-mkdir -p /mnt/sources/virtio
-
-rsync -avz --progress winfile/* /mnt/sources/virtio
-
-cd /mnt/sources
-
+# Add VirtIO drivers to boot.wim
+cd /mnt/sources || exit
 touch cmd.txt
-
-echo 'add virtio /virtio_drivers' >> cmd.txt
-
+echo 'add virtio /virtio_drivers' > cmd.txt
 wimlib-imagex update boot.wim 2 < cmd.txt
 
+# Reboot
 reboot
