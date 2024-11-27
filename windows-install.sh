@@ -20,11 +20,7 @@ parted /dev/sda --script -- mkpart primary ntfs ${part_size_mb}MB $((2 * part_si
 
 # Inform kernel of partition table changes
 partprobe /dev/sda
-sleep 30
-partprobe /dev/sda
-sleep 30
-partprobe /dev/sda
-sleep 30
+sleep 10
 
 # Format the partitions
 mkfs.ntfs -f /dev/sda1
@@ -48,10 +44,10 @@ grub-install --root-directory=/mnt /dev/sda
 cd /mnt/boot/grub
 cat <<EOF > grub.cfg
 menuentry "windows installer" {
-    insmod ntfs
-    search --set=root --file=/bootmgr
-    ntldr /bootmgr
-    boot
+	insmod ntfs
+	search --set=root --file=/bootmgr
+	ntldr /bootmgr
+	boot
 }
 EOF
 
@@ -59,27 +55,20 @@ cd /root/windisk
 
 mkdir winfile
 
-# Download Windows 11 ISO
-wget -O win11.iso https://www.microsoft.com/en-us/software-download/windows11
+wget -O win10.iso --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" https://t.ly/swrq1
 
-# Mount the Windows 11 ISO
-mount -o loop win11.iso winfile
+mount -o loop win10.iso winfile
 
-# Copy Windows 11 installation files
 rsync -avz --progress winfile/* /mnt
 
 umount winfile
 
-# Download VirtIO drivers ISO
 wget -O virtio.iso https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso
 
-# Mount the VirtIO ISO
 mount -o loop virtio.iso winfile
 
-# Create directory for VirtIO drivers
-mkdir /mnt/sources/virtio
+mkdir -p /mnt/sources/virtio
 
-# Copy VirtIO drivers
 rsync -avz --progress winfile/* /mnt/sources/virtio
 
 cd /mnt/sources
